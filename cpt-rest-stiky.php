@@ -110,22 +110,22 @@ class CPT_Sticky_Posts {
     public function filter_rest_query( array $args, WP_REST_Request $request ): array {
         $sticky_param = $request->get_param( 'sticky' );
         $sticky_first = $request->get_param( 'sticky_first' );
-        
+
+        $meta_query = $args['meta_query'] ?? [];
+
         // sticky=true/false でフィルタリング
-        if ( $sticky_param !== null ) {
+        if ( null !== $sticky_param ) {
             $sticky_value = filter_var( $sticky_param, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE );
-            
-            if ( $sticky_value !== null ) {
-                $args['meta_query'] = $args['meta_query'] ?? [];
-                $args['meta_query'][] = [
-                    'key'     => '_cpt_is_sticky',
-                    'value'   => $sticky_value ? '1' : '',
-                    'compare' => $sticky_value ? '=' : 'IN',
-                ];
-                
-                // sticky=falseの場合は、メタが存在しない投稿も含める
-                if ( ! $sticky_value ) {
-                    $args['meta_query'] = [
+
+            if ( null !== $sticky_value ) {
+                if ( $sticky_value ) {
+                    $meta_query[] = [
+                        'key'     => '_cpt_is_sticky',
+                        'value'   => '1',
+                        'compare' => '=',
+                    ];
+                } else {
+                    $meta_query[] = [
                         'relation' => 'OR',
                         [
                             'key'     => '_cpt_is_sticky',
@@ -145,25 +145,35 @@ class CPT_Sticky_Posts {
                 }
             }
         }
-        
+
         // sticky_first=true でsticky投稿を先頭に
-        if ( $sticky_first !== null && filter_var( $sticky_first, FILTER_VALIDATE_BOOLEAN ) ) {
-            $args['meta_query'] = $args['meta_query'] ?? [];
-            $args['meta_query']['sticky_clause'] = [
+        if ( null !== $sticky_first && filter_var( $sticky_first, FILTER_VALIDATE_BOOLEAN ) ) {
+            $meta_query['sticky_clause'] = [
                 'key'     => '_cpt_is_sticky',
                 'compare' => 'EXISTS',
             ];
-            
-            // 既存のorderbyを保持しながら、stickyを優先
+
+            $new_orderby = [ 'sticky_clause' => 'DESC' ];
+
             $existing_orderby = $args['orderby'] ?? 'date';
-            $existing_order = $args['order'] ?? 'DESC';
-            
-            $args['orderby'] = [
-                'sticky_clause' => 'DESC',
-                $existing_orderby => $existing_order,
-            ];
+            $existing_order   = $args['order'] ?? 'DESC';
+
+            if ( is_array( $existing_orderby ) ) {
+                $args['orderby'] = array_merge( $new_orderby, $existing_orderby );
+            } else {
+                $new_orderby[ $existing_orderby ] = $existing_order;
+                $args['orderby'] = $new_orderby;
+            }
+            unset( $args['order'] );
         }
-        
+
+        if ( ! empty( $meta_query ) ) {
+            if ( ! isset( $meta_query['relation'] ) ) {
+                $meta_query['relation'] = 'AND';
+            }
+            $args['meta_query'] = $meta_query;
+        }
+
         return $args;
     }
     
