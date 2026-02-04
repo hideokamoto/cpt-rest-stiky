@@ -25,8 +25,6 @@ class CPT_Sticky_Posts {
         add_action( 'rest_api_init', [ $this, 'register_rest_query_params' ] );
         add_action( 'add_meta_boxes', [ $this, 'add_sticky_meta_box' ] );
         add_action( 'save_post', [ $this, 'save_sticky_meta' ] );
-        add_filter( 'manage_posts_columns', [ $this, 'add_sticky_column' ], 10, 2 );
-        add_action( 'manage_posts_custom_column', [ $this, 'render_sticky_column' ], 10, 2 );
     }
     
     /**
@@ -40,12 +38,18 @@ class CPT_Sticky_Posts {
             'show_in_rest' => true,
             '_builtin' => false, // 標準のpost/pageは除外
         ], 'names' );
-        
+
         /**
          * 対象のカスタム投稿タイプをフィルター
          * @param array $post_types 対象の投稿タイプ配列
          */
         $this->target_post_types = apply_filters( 'cpt_sticky_posts_target_types', array_values( $post_types ) );
+
+        // 各投稿タイプに対してカラムフックを登録
+        foreach ( $this->target_post_types as $post_type ) {
+            add_filter( "manage_{$post_type}_posts_columns", [ $this, 'add_sticky_column' ], 10, 2 );
+            add_action( "manage_{$post_type}_posts_custom_column", [ $this, 'render_sticky_column' ], 10, 2 );
+        }
     }
     
     /**
@@ -59,8 +63,8 @@ class CPT_Sticky_Posts {
                 'single'        => true,
                 'default'       => false,
                 'show_in_rest'  => true,
-                'auth_callback' => function() {
-                    return current_user_can( 'edit_posts' );
+                'auth_callback' => function( $allowed, $meta_key, $post_id ) {
+                    return current_user_can( 'edit_post', $post_id );
                 },
             ] );
             
@@ -114,18 +118,21 @@ class CPT_Sticky_Posts {
         // sticky=true/false でフィルタリング
         if ( $sticky_param !== null ) {
             $sticky_value = filter_var( $sticky_param, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE );
-            
+
             if ( $sticky_value !== null ) {
-                $args['meta_query'] = $args['meta_query'] ?? [];
-                $args['meta_query'][] = [
-                    'key'     => '_cpt_is_sticky',
-                    'value'   => $sticky_value ? '1' : '',
-                    'compare' => $sticky_value ? '=' : 'IN',
-                ];
-                
-                // sticky=falseの場合は、メタが存在しない投稿も含める
-                if ( ! $sticky_value ) {
-                    $args['meta_query'] = [
+                // 既存のmeta_queryを保持
+                $existing_meta_query = $args['meta_query'] ?? [];
+
+                if ( $sticky_value ) {
+                    // sticky=trueの場合
+                    $sticky_clause = [
+                        'key'     => '_cpt_is_sticky',
+                        'value'   => '1',
+                        'compare' => '=',
+                    ];
+                } else {
+                    // sticky=falseの場合は、メタが存在しない投稿も含める
+                    $sticky_clause = [
                         'relation' => 'OR',
                         [
                             'key'     => '_cpt_is_sticky',
@@ -143,6 +150,17 @@ class CPT_Sticky_Posts {
                         ],
                     ];
                 }
+
+                // 既存のmeta_queryとAND結合
+                if ( ! empty( $existing_meta_query ) ) {
+                    $args['meta_query'] = [
+                        'relation' => 'AND',
+                        $existing_meta_query,
+                        $sticky_clause,
+                    ];
+                } else {
+                    $args['meta_query'] = $sticky_clause;
+                }
             }
         }
         
@@ -151,17 +169,24 @@ class CPT_Sticky_Posts {
             $args['meta_query'] = $args['meta_query'] ?? [];
             $args['meta_query']['sticky_clause'] = [
                 'key'     => '_cpt_is_sticky',
-                'compare' => 'EXISTS',
+                'value'   => '1',
+                'compare' => '=',
             ];
-            
+
             // 既存のorderbyを保持しながら、stickyを優先
-            $existing_orderby = $args['orderby'] ?? 'date';
-            $existing_order = $args['order'] ?? 'DESC';
-            
-            $args['orderby'] = [
-                'sticky_clause' => 'DESC',
-                $existing_orderby => $existing_order,
-            ];
+            if ( isset( $args['orderby'] ) && is_array( $args['orderby'] ) ) {
+                // orderbyが配列の場合、sticky_clauseを先頭に追加
+                $args['orderby'] = array_merge( [ 'sticky_clause' => 'DESC' ], $args['orderby'] );
+            } else {
+                // orderbyが文字列または未設定の場合
+                $existing_orderby = $args['orderby'] ?? 'date';
+                $existing_order = $args['order'] ?? 'DESC';
+
+                $args['orderby'] = [
+                    'sticky_clause' => 'DESC',
+                    $existing_orderby => $existing_order,
+                ];
+            }
         }
         
         return $args;
