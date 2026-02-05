@@ -25,8 +25,6 @@ class CPT_Sticky_Posts {
         add_action( 'rest_api_init', [ $this, 'register_rest_query_params' ] );
         add_action( 'add_meta_boxes', [ $this, 'add_sticky_meta_box' ] );
         add_action( 'save_post', [ $this, 'save_sticky_meta' ] );
-        add_filter( 'manage_posts_columns', [ $this, 'add_sticky_column' ], 10, 2 );
-        add_action( 'manage_posts_custom_column', [ $this, 'render_sticky_column' ], 10, 2 );
     }
     
     /**
@@ -40,12 +38,18 @@ class CPT_Sticky_Posts {
             'show_in_rest' => true,
             '_builtin' => false, // 標準のpost/pageは除外
         ], 'names' );
-        
+
         /**
          * 対象のカスタム投稿タイプをフィルター
          * @param array $post_types 対象の投稿タイプ配列
          */
         $this->target_post_types = apply_filters( 'cpt_sticky_posts_target_types', array_values( $post_types ) );
+
+        // 各投稿タイプに対してカラムフックを登録
+        foreach ( $this->target_post_types as $post_type ) {
+            add_filter( "manage_{$post_type}_posts_columns", [ $this, 'add_sticky_column' ], 10, 2 );
+            add_action( "manage_{$post_type}_posts_custom_column", [ $this, 'render_sticky_column' ], 10, 2 );
+        }
     }
     
     /**
@@ -54,13 +58,14 @@ class CPT_Sticky_Posts {
     public function register_sticky_meta(): void {
         foreach ( $this->target_post_types as $post_type ) {
             register_post_meta( $post_type, '_cpt_is_sticky', [
-                'type'          => 'boolean',
-                'description'   => __( 'この投稿を先頭に固定する', 'cpt-sticky-posts' ),
-                'single'        => true,
-                'default'       => false,
-                'show_in_rest'  => true,
-                'auth_callback' => function() {
-                    return current_user_can( 'edit_posts' );
+                'type'               => 'boolean',
+                'description'        => __( 'この投稿を先頭に固定する', 'cpt-sticky-posts' ),
+                'single'             => true,
+                'default'            => false,
+                'show_in_rest'       => true,
+                'sanitize_callback'  => 'rest_sanitize_boolean',
+                'auth_callback'      => function( $allowed, $meta_key, $post_id ) {
+                    return current_user_can( 'edit_post', $post_id );
                 },
             ] );
             
@@ -88,6 +93,11 @@ class CPT_Sticky_Posts {
      * stickyフィールドの更新コールバック
      */
     public function update_sticky_field( bool $value, WP_Post $post ): bool {
+        // 自動保存時はスキップ
+        if ( wp_is_post_autosave( $post->ID ) ) {
+            return false;
+        }
+
         return update_post_meta( $post->ID, '_cpt_is_sticky', $value );
     }
     
