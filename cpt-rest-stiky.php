@@ -152,10 +152,28 @@ class CPT_Sticky_Posts {
 
         // sticky_first=true でsticky投稿を先頭に
         if ( null !== $sticky_first && filter_var( $sticky_first, FILTER_VALIDATE_BOOLEAN ) ) {
+            // すべての投稿を含めるため、OR ロジックでメタ未設定も許可
             $meta_query['sticky_clause'] = [
-                'key'     => '_cpt_is_sticky',
-                'value'   => '1',
-                'compare' => '=',
+                'relation' => 'OR',
+                [
+                    'key'     => '_cpt_is_sticky',
+                    'value'   => '1',
+                    'compare' => '=',
+                ],
+                [
+                    'key'     => '_cpt_is_sticky',
+                    'compare' => 'NOT EXISTS',
+                ],
+                [
+                    'key'     => '_cpt_is_sticky',
+                    'value'   => '',
+                    'compare' => '=',
+                ],
+                [
+                    'key'     => '_cpt_is_sticky',
+                    'value'   => '0',
+                    'compare' => '=',
+                ],
             ];
 
             $new_orderby = [ 'sticky_clause' => 'DESC' ];
