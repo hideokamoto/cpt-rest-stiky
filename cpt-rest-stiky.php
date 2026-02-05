@@ -58,12 +58,13 @@ class CPT_Sticky_Posts {
     public function register_sticky_meta(): void {
         foreach ( $this->target_post_types as $post_type ) {
             register_post_meta( $post_type, '_cpt_is_sticky', [
-                'type'          => 'boolean',
-                'description'   => __( 'この投稿を先頭に固定する', 'cpt-sticky-posts' ),
-                'single'        => true,
-                'default'       => false,
-                'show_in_rest'  => true,
-                'auth_callback' => function( $allowed, $meta_key, $post_id ) {
+                'type'               => 'boolean',
+                'description'        => __( 'この投稿を先頭に固定する', 'cpt-sticky-posts' ),
+                'single'             => true,
+                'default'            => false,
+                'show_in_rest'       => true,
+                'sanitize_callback'  => 'rest_sanitize_boolean',
+                'auth_callback'      => function( $allowed, $meta_key, $post_id ) {
                     return current_user_can( 'edit_post', $post_id );
                 },
             ] );
@@ -92,6 +93,11 @@ class CPT_Sticky_Posts {
      * stickyフィールドの更新コールバック
      */
     public function update_sticky_field( bool $value, WP_Post $post ): bool {
+        // 自動保存時はスキップ
+        if ( wp_is_post_autosave( $post->ID ) ) {
+            return false;
+        }
+
         return update_post_meta( $post->ID, '_cpt_is_sticky', $value );
     }
     
